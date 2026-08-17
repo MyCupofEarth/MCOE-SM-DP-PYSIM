@@ -1,6 +1,7 @@
 Klein
 requests
 service_identity
+pyOpenSSL>=24.0.0
 pyserial
 pytlv
 cmd2>=2.6.2,<4.0
