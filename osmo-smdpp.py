@@ -861,8 +861,8 @@ class SmDppHttpServer:
 
 def main(argv):
     parser = argparse.ArgumentParser()
-    parser.add_argument("-H", "--host", help="Host/IP to bind HTTP(S) to", default="localhost")
-    parser.add_argument("-p", "--port", help="TCP port to bind HTTP(S) to", default=443)
+    parser.add_argument("-H", "--host", help="Host/IP to bind HTTP(S) to", default="0.0.0.0")
+    parser.add_argument("-p", "--port", help="TCP port to bind HTTP(S) to", type=int, default=int(os.environ.get("PORT", "10000")))
     parser.add_argument("-c", "--certdir", help=f"cert subdir relative to {DATA_DIR}", default="certs")
     parser.add_argument("-s", "--nossl", help="disable built in SSL/TLS support", action='store_true', default=False)
     parser.add_argument("-v", "--verbose", help="dump more raw info", action='store_true', default=False)
