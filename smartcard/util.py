@@ -1,8 +1,14 @@
 def toBytes(data):
     """
-    Minimal replacement for smartcard.util.toBytes
-    for pySim server-side usage.
+    Compatibility implementation of pyscard.util.toBytes.
+
+    Accepts:
+      - hex strings
+      - bytes
+      - bytearray
+      - lists/tuples of integers
     """
+
     if data is None:
         return []
 
@@ -12,15 +18,18 @@ def toBytes(data):
     if isinstance(data, bytearray):
         return list(data)
 
-    if isinstance(data, list):
-        return data
+    if isinstance(data, (list, tuple)):
+        return list(data)
 
     if isinstance(data, str):
-        data = data.replace(" ", "").replace(":", "")
+        value = data.replace(" ", "").replace(":", "").replace("-", "")
 
-        if len(data) % 2:
-            raise ValueError("Hex string must contain an even number of characters")
+        if value.startswith("0x"):
+            value = value[2:]
 
-        return list(bytes.fromhex(data))
+        if len(value) % 2:
+            value = "0" + value
+
+        return list(bytes.fromhex(value))
 
     raise TypeError(f"Unsupported data type: {type(data).__name__}")
