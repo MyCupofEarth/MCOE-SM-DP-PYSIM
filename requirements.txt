@@ -1,4 +1,5 @@
 Klein
+requests
 service_identity
 pyserial
 pytlv
