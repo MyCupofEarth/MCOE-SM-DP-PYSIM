@@ -38,6 +38,12 @@ def health():
     }
 
 
+@hs.app.route('/health', methods=['GET'])
+def health(request):
+    request.setHeader(b'content-type', b'application/json')
+    return b'{"status":"ok","service":"MCOE SM-DP+","server":"pySim"}'
+
+
 # =========================================================
 # DEVICE REGISTRATION
 # =========================================================
