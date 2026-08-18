@@ -138,7 +138,7 @@ logger = logging.getLogger(__name__)
 
 # HACK: make this configurable
 DATA_DIR = './smdpp-data'
-HOSTNAME = 'testsmdpplus1.example.com' # must match certificates!
+HOSTNAME = 'mcoe-sm-dp-pysim.onrender.com' # must match certificates!
 
 
 def b64encode2str(req: bytes) -> str:
