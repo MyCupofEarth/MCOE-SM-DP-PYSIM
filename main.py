@@ -1,14 +1,71 @@
-from fastapi import FastAPI, HTTPException
-from datetime import datetime
+from fastapi import FastAPI, HTTPException, Header
+from pydantic import BaseModel
+from datetime import datetime, timezone
 import secrets
 
 app = FastAPI(
-    title="MCOE eSIM Provisioning Server",
-    version="2.0.0"
+    title="MCOE eSIM Provisioning API",
+    version="2.1.0"
 )
+
+# =========================================================
+# IN-MEMORY STORAGE
+# =========================================================
 
 devices = {}
 esim_requests = {}
+
+
+# =========================================================
+# MODELS
+# =========================================================
+
+class DeviceRegisterRequest(BaseModel):
+    device_id: str
+    device_name: str
+
+
+class HeartbeatRequest(BaseModel):
+    device_id: str
+
+
+class ProvisionRequest(BaseModel):
+    device_id: str
+    eid: str | None = None
+
+
+# =========================================================
+# HELPERS
+# =========================================================
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def get_device(device_id: str):
+    device = devices.get(device_id)
+
+    if not device:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not registered"
+        )
+
+    return device
+
+
+def verify_token(device, token):
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing device token"
+        )
+
+    if token != device["device_token"]:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid device token"
+        )
 
 
 # =========================================================
@@ -19,9 +76,9 @@ esim_requests = {}
 def root():
 
     return {
-        "name": "MCOE eSIM Server",
+        "name": "MCOE eSIM Provisioning API",
         "status": "online",
-        "version": "2.0.0"
+        "version": "2.1.0"
     }
 
 
@@ -34,14 +91,9 @@ def health():
 
     return {
         "status": "healthy",
-        "server": "MCOE eSIM Server"
+        "service": "MCOE eSIM API",
+        "timestamp": now()
     }
-
-
-@hs.app.route('/health', methods=['GET'])
-def health(request):
-    request.setHeader(b'content-type', b'application/json')
-    return b'{"status":"ok","service":"MCOE SM-DP+","server":"pySim"}'
 
 
 # =========================================================
@@ -49,10 +101,9 @@ def health(request):
 # =========================================================
 
 @app.post("/api/device/register")
-def register_device(
-    device_id: str,
-    device_name: str
-):
+def register_device(data: DeviceRegisterRequest):
+
+    device_id = data.device_id
 
     token = secrets.token_urlsafe(32)
 
@@ -60,18 +111,19 @@ def register_device(
 
         "device_id": device_id,
 
-        "device_name": device_name,
+        "device_name": data.device_name,
 
         "device_token": token,
 
         "online": True,
 
-        "last_seen":
-            datetime.utcnow().isoformat(),
+        "last_seen": now(),
 
         "eid": None,
 
-        "esim_status": "not_provisioned"
+        "esim_status": "not_provisioned",
+
+        "profile_id": None
     }
 
     return {
@@ -90,101 +142,174 @@ def register_device(
 
 @app.post("/api/device/heartbeat")
 def heartbeat(
-    device_id: str,
-    device_token: str
+    data: HeartbeatRequest,
+    authorization: str | None = Header(default=None)
 ):
 
-    device = devices.get(device_id)
+    device = get_device(data.device_id)
 
-    if not device:
+    token = None
 
-        raise HTTPException(
-            status_code=404,
-            detail="Device not registered"
-        )
+    if authorization:
 
-    if device["device_token"] != device_token:
+        if authorization.lower().startswith("bearer "):
 
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid device token"
-        )
+            token = authorization[7:]
+
+    verify_token(device, token)
 
     device["online"] = True
-
-    device["last_seen"] = \
-        datetime.utcnow().isoformat()
+    device["last_seen"] = now()
 
     return {
-        "ok": True
+        "ok": True,
+        "device_id": data.device_id,
+        "last_seen": device["last_seen"]
     }
 
 
 # =========================================================
-# eSIM PROVISION REQUEST
+# ESIM PROVISION REQUEST
 # =========================================================
 
-@app.get("/api/esim/provision")
-def esim_provision(device_id: str):
+@app.post("/api/esim/provision")
+def esim_provision(
+    data: ProvisionRequest,
+    authorization: str | None = Header(default=None)
+):
 
-    # Android/AOSP TS.48 test profile
-    smdp_address = "prod.smdp-plus.rsp.goog"
+    device = get_device(data.device_id)
 
-    matching_id = "3TD6-8L82-HUE1-LVN6"
+    token = None
 
-    activation_code = (
-        "1$prod.smdp-plus.rsp.goog$3TD6-8L82-HUE1-LVN6"
-    )
+    if authorization:
+
+        if authorization.lower().startswith("bearer "):
+
+            token = authorization[7:]
+
+    verify_token(device, token)
+
+    # Store EID if Android supplied it
+    if data.eid:
+
+        device["eid"] = data.eid
+
+    request_id = secrets.token_urlsafe(16)
+
+    esim_requests[request_id] = {
+
+        "request_id": request_id,
+
+        "device_id": data.device_id,
+
+        "eid": data.eid,
+
+        "status": "pending",
+
+        "created_at": now()
+    }
+
+    device["esim_status"] = "pending"
 
     return {
+
         "provider": "MCOE",
-        "device_id": device_id,
-        "type": "esim",
-        "status": "ready",
 
-        "smdp_address": smdp_address,
+        "request_id": request_id,
 
-        "matching_id": matching_id,
+        "device_id": data.device_id,
 
-        "activation_code": activation_code,
+        "eid": data.eid,
 
-        "message": "MCOE test eSIM profile ready"
+        "status": "pending",
+
+        "message":
+            "eSIM provisioning request created. "
+            "The SM-DP+ must now process this request."
     }
 
 
 # =========================================================
-# eSIM STATUS
+# ESIM STATUS
 # =========================================================
 
 @app.get("/api/esim/status")
 def esim_status(
-    device_id: str
+    device_id: str,
+    authorization: str | None = Header(default=None)
 ):
 
-    device = devices.get(device_id)
+    device = get_device(device_id)
 
-    if not device:
+    token = None
 
-        raise HTTPException(
-            status_code=404,
-            detail="Device not registered"
-        )
+    if authorization:
 
+        if authorization.lower().startswith("bearer "):
+
+            token = authorization[7:]
+
+    verify_token(device, token)
 
     return {
 
-        "provider":
-            "MCOE",
+        "provider": "MCOE",
 
-        "device_id":
-            device_id,
+        "device_id": device_id,
 
-        "eid":
-            device["eid"],
+        "eid": device["eid"],
 
-        "status":
-            device["esim_status"],
+        "status": device["esim_status"],
+
+        "profile_id": device["profile_id"],
 
         "esim_active":
             device["esim_status"] == "active"
     }
+
+
+# =========================================================
+# PROVISION REQUEST STATUS
+# =========================================================
+
+@app.get("/api/esim/request/{request_id}")
+def provision_request_status(
+    request_id: str
+):
+
+    request = esim_requests.get(request_id)
+
+    if not request:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Provision request not found"
+        )
+
+    return request
+
+
+# =========================================================
+# DEVICE STATUS
+# =========================================================
+
+@app.get("/api/device/{device_id}")
+def device_status(
+    device_id: str,
+    authorization: str | None = Header(default=None)
+):
+
+    device = get_device(device_id)
+
+    token = None
+
+    if authorization:
+
+        if authorization.lower().startswith("bearer "):
+
+            token = authorization[7:]
+
+    verify_token(device, token)
+
+    return device
