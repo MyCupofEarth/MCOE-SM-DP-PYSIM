@@ -460,11 +460,41 @@ class SmDppHttpServer:
         def _api_wrapper(self, request: IRequest):
             validate_request_headers(request)
 
-            content = json.loads(request.content.read())
-            logger.debug("Rx JSON: %s" % json.dumps(content))
-            set_headers(request)
+            raw_body = request.content.read()
 
-            output = func(self, request, content)
+logger.debug("RAW REQUEST BODY: %r", raw_body)
+
+try:
+    if isinstance(raw_body, bytes):
+        raw_body = raw_body.decode("utf-8")
+
+    content = json.loads(raw_body)
+
+except (UnicodeDecodeError, json.JSONDecodeError) as e:
+    logger.exception("Invalid JSON received")
+
+    request.setResponseCode(400)
+    set_headers(request)
+
+    return json.dumps({
+        "error": "Invalid JSON",
+        "message": str(e)
+    })
+
+logger.debug("Rx JSON: %s", json.dumps(content))
+
+set_headers(request)
+
+output = func(self, request, content)
+
+if output is None:
+    return ''
+
+build_resp_header(output)
+
+logger.debug("Tx JSON: %s", json.dumps(output))
+
+return json.dumps(output)
             if output == None:
                 return ''
 
